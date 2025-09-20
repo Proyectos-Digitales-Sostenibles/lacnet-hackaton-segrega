@@ -1,0 +1,8 @@
+
+node scripts/mkprivkey.js
+
+```
+SAVE BUT DO NOT SHARE THIS: 0x0dd81424cb66a9571df6d2785f29542c5954cde036cc7ea61d8aa302210ca809
+Address: 0x5B3cae139F870ce0B6B6cB97640D8351618855c8
+```
+

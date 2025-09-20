@@ -20,9 +20,8 @@ export class TransactionHashSchedulerService {
     private readonly transactionRepo: Repository<TransactionEntity>,
   ) {}
 
-  // Every 5 minutes
+  // Every 10 seconds
   @Cron(CronExpression.EVERY_10_SECONDS)
-  // @Cron(CronExpression.EVERY_5_MINUTES)
   async computeMissingInmutableHashes(): Promise<void> {
     const unlock = await Mutex.getLock('compute-hash-lock').lock(true);
     const transactionQueryRunner = this.transactionRepo.manager.connection.createQueryRunner();
