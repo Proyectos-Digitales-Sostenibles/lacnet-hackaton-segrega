@@ -1,0 +1,68 @@
+docker-build:
+  # Use the official docker image.
+  image: docker:latest
+  stage: build
+  services:
+    - docker:dind
+  variables:
+    GIT_SUBMODULE_STRATEGY: recursive
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+  # Default branch leaves tag empty (= latest tag)
+  # All other branches are tagged with the escaped branch name (commit ref slug)
+  script:
+    - |
+      if [[ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]]; then
+        tag=""
+        echo "Running on default branch '$CI_DEFAULT_BRANCH': tag = 'latest'"
+      else
+        tag=":$CI_COMMIT_REF_SLUG"
+        echo "Running on branch '$CI_COMMIT_BRANCH': tag = $tag"
+      fi
+    - docker build --pull -t "$CI_REGISTRY_IMAGE${tag}" -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA" .
+    - docker push "$CI_REGISTRY_IMAGE" --all-tags
+  # Run this job in a branch where a Dockerfile exists
+  only:
+    # - master
+    - develop
+
+deploy-compose-ssh:
+  stage: deploy
+  image: alpine:latest
+  environment: Prod
+  needs: ['docker-build']
+  before_script:
+    - apk update && apk add curl openssh-client
+  script:
+    # Parse and generate required info from env variables
+    - >
+      [[ -z $DOCKER_REPO_REPLACE ]] && export DOCKER_REPO_REPLACE=repo-docker.local.ticsmart.eu;
+      [[ -z $DOCKER_SSH_IMAGE ]] && export DOCKER_SSH_IMAGE=$(echo "$CI_REGISTRY_IMAGE:latest" | sed "s/$CI_REGISTRY/$DOCKER_REPO_REPLACE/g");
+      [[ -z $DOCKER_SSH_COMPOSE_PATH ]] && export DOCKER_SSH_COMPOSE_PATH=/root/deploy;
+      # Extract the part before the colon (:)
+      [[ -z $DOCKER_SSH_IMAGE_NAME ]] && export DOCKER_SSH_IMAGE_NAME="${DOCKER_SSH_IMAGE%%:*}";
+
+    - echo "$DOCKER_SSH_KEY" | tr -d '\r' > id_rsa
+    - chmod 600 id_rsa
+
+    - echo "Going to replace image:"$DOCKER_SSH_IMAGE_NAME
+    - '[ -z "$DOCKER_SSH_IMAGE_NAME" ] && { echo "Error: DOCKER_SSH_IMAGE_NAME is not set or is empty."; exit 1; }'
+
+    # Connect to the remote server via SSH and perform Docker operations.
+    - >
+      ssh -p $DOCKER_SSH_PORT -i id_rsa -o stricthostkeychecking=no $DOCKER_SSH_USER@$DOCKER_SSH_SERVER "
+        # Navigate to the Docker Compose directory.
+        cd $DOCKER_SSH_COMPOSE_PATH;
+
+        # Update the image reference in the docker-compose.yml file using sed.
+        sed -i 's|image: $DOCKER_SSH_IMAGE_NAME.*|image: $DOCKER_SSH_IMAGE|' docker-compose.yml;
+
+        # Pull the compose project images
+        docker compose pull;
+
+        # Deploy the updated Docker Compose stack in detached mode.
+        docker compose up -d
+      "
+  only:
+    # - master
+    - develop
